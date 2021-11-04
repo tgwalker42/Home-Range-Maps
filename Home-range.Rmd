@@ -1,0 +1,152 @@
+---
+title: "Home-Range Assignment"
+author: "Trevor Walker"
+date: "11/4/2021"
+output: html_document
+---
+
+## Bat Foraging Range
+
+
+```{r setup, include=FALSE}
+packages<-c("adehabitatHR","data.table","ggfortify","grid","move","moveVis","OpenStreetMap","pbapply","plotly","rgdal","sp","tidyverse","viridis")
+sapply(packages, library, character.only=T)
+
+batdata<-read.csv("TABR.csv")
+```
+
+**As You all know I love Radio Telemetry!**
+
+![Me Telemetry Tracking](Images/Telemetry.jpg){width= 50%}
+
+
+
+
+**Turtles**
+
+![Tagged Carolina Box Turtle](Images/turtle.jpg){width=50%}
+
+
+**Snakes**
+
+![Black Racer almost biting me](Images/Snake.jpg){width=50%}
+
+
+**And of Course Bats!**
+
+![Mexican Free-Tailed Bat](Images/TABR.jpg){width=50%}
+
+Theses Guys tracked these bats from a Cessna Airplane and mapped their flightpaths through a single night
+
+
+
+![Cessna 172](Images/Cessna_172.jpg){width=50%}
+## QAQC Plot
+
+
+```{r qac plot, include=TRUE}
+qaqc_plot <- ggplot() + geom_point(data=batdata, 
+                                   aes(latitude,longitude,
+                                       color=individual)) +
+  labs(x="Latitude", y="Longitude") +
+  guides(color=guide_legend("Identifier"))
+
+ggplotly(qaqc_plot)
+```
+
+## Plot Over Background
+
+
+
+```{r CSV Split, include= FALSE}
+lapply(split(batdata, batdata$individual), 
+       function(x)write.csv(x, file = paste(x$individual[1],".csv", sep = ""), row.names = FALSE))
+
+files <- list.files(path = ".", pattern = "[0-9]", full.names = TRUE)
+
+mapdata_raster <- openmap(c(max(batdata$latitude)+0.010, min(batdata$longitude)-0.010), + 
+                            c(min(batdata$latitude)-0.010, max(batdata$longitude)+0.010), type = "bing")
+
+
+mapdata_raster_proj <- openproj(mapdata_raster, projection = "+proj=longlat +datum=WGS84")
+```
+
+
+```{r Map 1, include= TRUE}
+
+
+autoplot.OpenStreetMap(mapdata_raster_proj, expand = TRUE) + theme_bw() +
+  theme(legend.position="bottom") +
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+  geom_point(data=batdata, aes(longitude,latitude,
+                            color=individual), size = 3, alpha = 0.8) +
+  theme(axis.title = element_text(face="bold")) + labs(x="Longitude",
+                                                       y="Latitude") + guides(color=guide_legend("Identifier"))
+```
+
+```{r MCP Plot map, include=TRUE}
+mcp_raster <- function(files){
+  data <- read.csv(file = files)
+  x <- as.data.frame(data$longitude)
+  y <- as.data.frame(data$latitude)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=longlat +datum=WGS84"))
+  xy <- SpatialPoints(data.proj@coords)
+  mcp.out <- mcp(xy, percent=100, unout="km2")
+  mcp.points <- cbind((data.frame(xy)),data$individual)
+  colnames(mcp.points) <- c("x","y", "identifier")
+  mcp.poly <- fortify(mcp.out, region = "id")
+  units <- grid.text(paste(round(mcp.out@data$area,2),"ha"), x=0.85,  y=0.95,
+                     gp=gpar(fontface=4, col="white", cex=0.9), draw = FALSE)
+  mcp.plot <- autoplot.OpenStreetMap(mapdata_raster_proj, expand = TRUE) + theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=mcp.poly, aes(x=mcp.poly$long, y=mcp.poly$lat), alpha=0.8) +
+    geom_point(data=mcp.points, aes(x=x, y=y)) + 
+    labs(x="Longitude", y="Latitude", title=mcp.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold", hjust = 0.5)) + 
+    annotation_custom(units)
+  mcp.plot
+}
+
+pblapply(files, mcp_raster)
+```
+
+
+```{r KDE Map, include = TRUE}
+kde_raster <- function(filename){
+  data <- read.csv(file = filename)
+  x <- as.data.frame(data$longitude)
+  y <- as.data.frame(data$latitude)
+  xy <- c(x,y)
+  data.proj <- SpatialPointsDataFrame(xy,data, proj4string = CRS("+proj=longlat +datum=WGS84"))
+  xy <- SpatialPoints(data.proj@coords)
+  kde<-kernelUD(xy, h="href", kern="bivnorm", grid=100)
+  ver <- getverticeshr(kde, 95)
+  kde.points <- cbind((data.frame(data.proj@coords)),data$individual)
+  colnames(kde.points) <- c("x","y","identifier")
+  kde.poly <- fortify(ver, region = "id")
+  units <- grid.text(paste(round(ver$area,2)," ha"), x=0.85,  y=0.95,
+                     gp=gpar(fontface=4, col="white", cex=0.9), draw = FALSE)
+  kde.plot <- autoplot.OpenStreetMap(mapdata_raster_proj, expand = TRUE) + theme_bw() + theme(legend.position="none") +
+    theme(panel.border = element_rect(colour = "black", fill=NA, size=1)) +
+    geom_polygon(data=kde.poly, aes(x=kde.poly$long, y=kde.poly$lat), alpha = 0.8) +
+    geom_point(data=kde.points, aes(x=x, y=y)) +
+    labs(x="Longitude", y="Latitude", title=kde.points$identifier) +
+    theme(legend.position="none", plot.title = element_text(face = "bold", hjust = 0.5)) + 
+    annotation_custom(units)
+  kde.plot
+}
+
+pblapply(files, kde_raster)
+```
+
+
+
+
+
+
+
+
+
+
+
